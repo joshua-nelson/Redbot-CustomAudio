@@ -10,7 +10,6 @@ import discord
 from discord import app_commands
 from redbot.core import commands
 
-from ..lavalink_manager import LavalinkManager
 from ..models import Track
 
 log = logging.getLogger("red.muse_music.resolver")
@@ -44,8 +43,7 @@ class TimedCache:
 class ResolverService:
     """Resolves user queries to Lavalink tracks without enqueuing."""
 
-    def __init__(self, lavalink: LavalinkManager):
-        self.lavalink = lavalink
+    def __init__(self):
         self.cache = TimedCache(ttl=10.0, maxsize=64)
         self.lock = asyncio.Lock()
 
@@ -53,7 +51,12 @@ class ResolverService:
         cached = self.cache.get(query)
         if cached:
             return cached
-        node = self.lavalink.get_node()
+        try:
+            from redbot.cogs.audio import lavalink
+        except ImportError:
+            raise commands.UserFeedbackCheckFailure("Lavalink is unavailable.")
+
+        node = lavalink.get_node()
         if node is None:
             raise commands.UserFeedbackCheckFailure("No Lavalink nodes are configured.")
         results = await node.get_tracks(query)
