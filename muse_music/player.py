@@ -11,7 +11,6 @@ from redbot.core import Config, commands
 from redbot.core.bot import Red
 from redbot.core.utils.chat_formatting import humanize_timedelta
 
-from .lavalink_manager import LavalinkManager
 from .models import Track
 
 
@@ -24,11 +23,10 @@ class LoopMode(str, Enum):
 class GuildPlayer:
     """Stateful queue and playback controller for a single guild."""
 
-    def __init__(self, bot: Red, guild_id: int, config: Config, lavalink: LavalinkManager):
+    def __init__(self, bot: Red, guild_id: int, config: Config):
         self.bot = bot
         self.guild_id = guild_id
         self.config = config
-        self.lavalink = lavalink
         self.queue: Deque[Track] = deque()
         self.current: Optional[Track] = None
         self.loop_mode: LoopMode = LoopMode.OFF
@@ -93,78 +91,64 @@ class GuildPlayer:
         self.loop_mode = mode
         await self.persist()
 
-    async def on_track_end(self, reason: str) -> tuple[Optional[Track], Optional[Track]]:
+    async def on_track_end(self, reason: str) -> Optional[Track]:
+        if self.current is None:
+            return None
         finished = self.current
-        self.current = None
-        await self.config.guild_from_id(self.guild_id).current.clear()
-
-        if finished is None:
-            return None, None
-
-        next_track: Optional[Track] = None
         if self.loop_mode == LoopMode.TRACK:
-            next_track = finished
-        elif self.loop_mode == LoopMode.QUEUE:
+            return finished
+        if self.loop_mode == LoopMode.QUEUE:
             self.queue.append(finished)
-            next_track = self.pop_next()
-        else:
-            next_track = self.pop_next()
+        return self.pop_next()
 
-        await self.persist()
-        return finished, next_track
-
-    async def start_playback(self, voice_channel: discord.abc.Snowflake | int, track: Track) -> None:
+    async def start_playback(self, voice_channel: discord.VoiceChannel, track: Track) -> None:
         """Start playback for the provided track through Lavalink."""
-        await self._get_lavalink_player(voice_channel=voice_channel)
+        player = await self._get_lavalink_player(voice_channel=voice_channel)
+        if player is None:
+            raise commands.UserFeedbackCheckFailure("Unable to connect to Lavalink.")
         self.current = track
-        await self._rest_update(
-            encodedTrack=track.lavalink_track,
-            position=0,
-            volume=self.default_volume,
-            paused=False,
-        )
+        await player.set_volume(self.default_volume)
+        await player.play(track.lavalink_track, start_time=0)
         await self.config.guild_from_id(self.guild_id).current.set(track.to_dict())
 
-    async def maybe_start_next(self, voice_channel: discord.abc.Snowflake | int) -> Optional[Track]:
+    async def maybe_start_next(self, voice_channel: discord.VoiceChannel) -> Optional[Track]:
         if self.current:
             return self.current
         next_track = self.pop_next()
         if next_track:
-            await self.persist()
             await self.start_playback(voice_channel, next_track)
             return next_track
         return None
 
     async def stop(self) -> None:
-        await self._rest_update(encodedTrack=None)
+        player = await self._get_lavalink_player()
+        if player:
+            await player.stop()
         self.current = None
         await self.config.guild_from_id(self.guild_id).current.clear()
 
     async def set_pause(self, paused: bool) -> None:
-        await self._rest_update(paused=paused)
+        player = await self._get_lavalink_player()
+        if player:
+            await player.set_pause(paused)
 
     async def set_volume(self, level: int) -> None:
-        await self._rest_update(volume=level)
-        self.default_volume = level
-        await self.config.guild_from_id(self.guild_id).default_volume.set(level)
+        player = await self._get_lavalink_player()
+        if not player:
+            raise commands.UserFeedbackCheckFailure("Nothing is playing right now.")
+        await player.set_volume(level)
 
-    async def _rest_update(self, **payload: dict[str, object]) -> dict:
+    async def _get_lavalink_player(self, voice_channel: Optional[discord.VoiceChannel] = None):
         try:
-            return await self.lavalink.update_player(self.guild_id, **payload)
-        except Exception as exc:
-            raise commands.UserFeedbackCheckFailure("Lavalink is not available or rejected the command.") from exc
-
-    async def _get_lavalink_player(self, voice_channel: Optional[discord.abc.Snowflake | int] = None):
-        if voice_channel is not None:
-            channel_id = voice_channel if isinstance(voice_channel, int) else voice_channel.id
-            try:
-                await self.lavalink.connect(self.guild_id, channel_id)
-            except Exception:
-                raise commands.UserFeedbackCheckFailure("Unable to connect to the voice channel or Lavalink.")
-        try:
-            return await self.lavalink.get_player(self.guild_id)
-        except Exception:
+            from redbot.cogs.audio import lavalink
+        except ImportError:
             raise commands.UserFeedbackCheckFailure("Lavalink is not available on this bot.")
+
+        player = lavalink.get_player(self.guild_id)
+        if player is None and voice_channel is not None:
+            await lavalink.connect(self.guild_id, voice_channel.id)
+            player = lavalink.get_player(self.guild_id)
+        return player
 
     def progress_bar(self, position_ms: int) -> str:
         if not self.current:
@@ -182,15 +166,14 @@ class GuildPlayer:
 class PlayerController:
     """Manages GuildPlayer instances for the cog."""
 
-    def __init__(self, bot: Red, config: Config, lavalink: LavalinkManager):
+    def __init__(self, bot: Red, config: Config):
         self.bot = bot
         self.config = config
         self.players: Dict[int, GuildPlayer] = {}
-        self.lavalink = lavalink
 
     async def get_player(self, guild: Snowflake) -> GuildPlayer:
         if guild.id not in self.players:
-            player = GuildPlayer(self.bot, guild.id, self.config, self.lavalink)
+            player = GuildPlayer(self.bot, guild.id, self.config)
             await player.load()
             self.players[guild.id] = player
         return self.players[guild.id]
