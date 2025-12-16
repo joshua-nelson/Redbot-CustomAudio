@@ -13,12 +13,11 @@ Hybrid slash/prefix music controls that mirror the Muse UX while delegating all 
    * Ensure the port/password match your Lavalink server (for example, port `2333` and password `youshallnotpass`).
 
 3. **Use the commands**
-   * Commands are namespaced under `/muse` so they can coexist with Red's built-in Audio cog (no need to unload it). Examples:
-     * `/muse play`, `/muse pause`, `/muse resume`, `/muse skip`, `/muse stop`, `/muse queue`, `/muse nowplaying`, `/muse loop`, `/muse remove`, `/muse move`, `/muse clear`, `/muse volume`, `/muse autoplay`, `/muse maxqueue` — all require you to be in a voice channel.
-   * `/muse play` includes autocomplete for YouTube/SoundCloud searches; it never alters playback until you submit the command.
+   * `/play`, `/pause`, `/resume`, `/skip`, `/stop`, `/queue`, `/nowplaying`, `/loop`, `/remove`, `/move`, `/clear`, `/volume`, `/autoplay`, and `/maxqueue` all require you to be in a voice channel.
+   * `/play` includes autocomplete for YouTube/SoundCloud searches; it never alters playback until you submit the command.
 
 4. **Autoplay & limits**
-   * Toggle related-track autoplay with `/muse autoplay true|false`.
-   * Restrict queue size per guild with `/muse maxqueue <size>`.
+   * Toggle related-track autoplay with `/autoplay true|false`.
+   * Restrict queue size per guild with `/maxqueue <size>`.
 
 All playback, decoding, and streaming stay inside Lavalink; the cog only orchestrates commands, queues, and embeds.

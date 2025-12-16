@@ -37,7 +37,7 @@ class MuseMusic(commands.Cog):
         self.resolver = ResolverService()
         self.player_controller = PlayerController(bot, self.config)
         self.autoplay = AutoplayService(self.resolver)
-        self.events = LavalinkEvents(self.player_controller, self.autoplay, bot)
+        self.events = LavalinkEvents(self.player_controller)
 
     async def cog_load(self) -> None:
         await self.events.connect()
@@ -68,15 +68,7 @@ class MuseMusic(commands.Cog):
             raise commands.UserFeedbackCheckFailure("No results were found for that query.")
         return tracks[0]
 
-    @commands.hybrid_group(name="muse", invoke_without_command=True)
-    async def muse(self, ctx: commands.Context) -> None:
-        """Muse-style music controls that run on Lavalink."""
-        if ctx.interaction:
-            await ctx.send("Use one of the subcommands, e.g. `/muse play <song>`.")
-        else:
-            await ctx.send_help()
-
-    @muse.command(name="play", description="Play a track or playlist using Lavalink.")
+    @commands.hybrid_command(name="play", description="Play a track or playlist using Lavalink.")
     async def play(self, ctx: commands.Context, *, query: str) -> None:
         """Queue a new track from a query or URL."""
         channel = await self._ensure_voice(ctx)
@@ -97,7 +89,7 @@ class MuseMusic(commands.Cog):
                 except commands.UserFeedbackCheckFailure as exc:
                     await ctx.send(str(exc))
 
-    @muse.command(name="pause")
+    @commands.hybrid_command(name="pause")
     async def pause(self, ctx: commands.Context) -> None:
         channel = await self._ensure_voice(ctx)
         if not channel:
@@ -110,7 +102,7 @@ class MuseMusic(commands.Cog):
             return
         await ctx.send("Paused playback.")
 
-    @muse.command(name="resume")
+    @commands.hybrid_command(name="resume")
     async def resume(self, ctx: commands.Context) -> None:
         channel = await self._ensure_voice(ctx)
         if not channel:
@@ -123,7 +115,7 @@ class MuseMusic(commands.Cog):
             return
         await ctx.send("Resumed playback.")
 
-    @muse.command(name="skip")
+    @commands.hybrid_command(name="skip")
     async def skip(self, ctx: commands.Context) -> None:
         channel = await self._ensure_voice(ctx)
         if not channel:
@@ -136,7 +128,7 @@ class MuseMusic(commands.Cog):
             return
         await ctx.send("Skipped the current track.")
 
-    @muse.command(name="stop")
+    @commands.hybrid_command(name="stop")
     async def stop(self, ctx: commands.Context) -> None:
         channel = await self._ensure_voice(ctx)
         if not channel:
@@ -150,7 +142,7 @@ class MuseMusic(commands.Cog):
             return
         await ctx.send("Stopped playback and cleared the queue.")
 
-    @muse.command(name="queue")
+    @commands.hybrid_command(name="queue")
     async def queue(self, ctx: commands.Context) -> None:
         channel = await self._ensure_voice(ctx)
         if not channel:
@@ -159,7 +151,7 @@ class MuseMusic(commands.Cog):
         embed = queue_page_embed(player, page=0)
         await ctx.send(embed=embed)
 
-    @muse.command(name="nowplaying")
+    @commands.hybrid_command(name="nowplaying")
     async def nowplaying(self, ctx: commands.Context) -> None:
         channel = await self._ensure_voice(ctx)
         if not channel:
@@ -168,20 +160,13 @@ class MuseMusic(commands.Cog):
         embed = now_playing_embed(player, position=0)
         await ctx.send(embed=embed)
 
-    @muse.command(name="loop")
+    @commands.hybrid_command(name="loop")
     async def loop(self, ctx: commands.Context, mode: Optional[str] = None) -> None:
         channel = await self._ensure_voice(ctx)
         if not channel:
             return
         player = await self.player_controller.get_player(ctx.guild)
-        if mode:
-            try:
-                target_mode = LoopMode(mode.lower())
-            except ValueError:
-                await ctx.send("Loop mode must be one of: off, track, queue.")
-                return
-        else:
-            target_mode = LoopMode.OFF
+        target_mode = LoopMode(mode) if mode else LoopMode.OFF
         try:
             await player.set_loop(target_mode)
         except commands.UserFeedbackCheckFailure as exc:
@@ -189,7 +174,7 @@ class MuseMusic(commands.Cog):
             return
         await ctx.send(f"Loop mode set to **{target_mode.value}**.")
 
-    @muse.command(name="remove")
+    @commands.hybrid_command(name="remove")
     async def remove(self, ctx: commands.Context, index: int) -> None:
         channel = await self._ensure_voice(ctx)
         if not channel:
@@ -202,7 +187,7 @@ class MuseMusic(commands.Cog):
             return
         await ctx.send(f"Removed **{track.title}** from the queue.")
 
-    @muse.command(name="move")
+    @commands.hybrid_command(name="move")
     async def move(self, ctx: commands.Context, start: int, end: int) -> None:
         channel = await self._ensure_voice(ctx)
         if not channel:
@@ -215,7 +200,7 @@ class MuseMusic(commands.Cog):
             return
         await ctx.send(f"Moved track from position {start} to {end}.")
 
-    @muse.command(name="clear")
+    @commands.hybrid_command(name="clear")
     async def clear(self, ctx: commands.Context) -> None:
         channel = await self._ensure_voice(ctx)
         if not channel:
@@ -228,7 +213,7 @@ class MuseMusic(commands.Cog):
             return
         await ctx.send("Cleared the queue.")
 
-    @muse.command(name="volume")
+    @commands.hybrid_command(name="volume")
     async def volume(self, ctx: commands.Context, level: int) -> None:
         channel = await self._ensure_voice(ctx)
         if not channel:
@@ -242,33 +227,9 @@ class MuseMusic(commands.Cog):
         except commands.UserFeedbackCheckFailure as exc:
             await ctx.send(str(exc))
             return
+        config = self.config.guild(ctx.guild)
+        await config.default_volume.set(level)
         await ctx.send(f"Volume set to {level}.")
-
-    @muse.command(name="autoplay")
-    async def autoplay(self, ctx: commands.Context, enabled: bool) -> None:
-        """Toggle autoplay for when the queue ends."""
-        channel = await self._ensure_voice(ctx)
-        if not channel:
-            return
-        player = await self.player_controller.get_player(ctx.guild)
-        player.autoplay_enabled = enabled
-        await self.config.guild(ctx.guild).autoplay.set(enabled)
-        await ctx.send(f"Autoplay {'enabled' if enabled else 'disabled'}.")
-
-    @muse.command(name="maxqueue")
-    @commands.admin_or_permissions(manage_guild=True)
-    async def maxqueue(self, ctx: commands.Context, size: int) -> None:
-        """Set the maximum queue length for this server."""
-        channel = await self._ensure_voice(ctx)
-        if not channel:
-            return
-        if size < 1 or size > 1000:
-            await ctx.send("Queue size must be between 1 and 1000.")
-            return
-        player = await self.player_controller.get_player(ctx.guild)
-        player.max_queue_length = size
-        await self.config.guild(ctx.guild).max_queue_length.set(size)
-        await ctx.send(f"Max queue size set to {size}.")
 
     @play.autocomplete("query")
     async def _play_autocomplete(self, interaction: discord.Interaction, current: str):

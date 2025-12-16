@@ -6,8 +6,7 @@ from typing import Any
 import discord
 from redbot.core import commands
 
-from .player import PlayerController
-from .services.autoplay import AutoplayService
+from .player import PlayerController, LoopMode
 
 log = logging.getLogger("red.muse_music.events")
 
@@ -15,10 +14,8 @@ log = logging.getLogger("red.muse_music.events")
 class LavalinkEvents:
     """Event bridge between Lavalink and guild players."""
 
-    def __init__(self, controller: PlayerController, autoplay: AutoplayService, bot: discord.Client):
+    def __init__(self, controller: PlayerController):
         self.controller = controller
-        self.autoplay = autoplay
-        self.bot = bot
 
     async def track_start(self, event: Any) -> None:
         log.info("Track started in guild %s", event.guild_id)
@@ -32,30 +29,18 @@ class LavalinkEvents:
             return
         try:
             player = await self.controller.get_player(discord.Object(id=guild))
-            finished, next_track = await player.on_track_end(getattr(event, "reason", ""))
+            next_track = await player.on_track_end(getattr(event, "reason", ""))
+            if not next_track:
+                await player.stop()
+                return
+            # attempt to resume playback in the same channel
             voice_channel_id = getattr(event.player, "channel_id", None)
-            voice_channel_id = int(voice_channel_id) if voice_channel_id else None
-
-            if next_track and voice_channel_id:
+            if voice_channel_id:
+                voice_channel = discord.Object(id=voice_channel_id)
                 try:
-                    await player.start_playback(voice_channel_id, next_track)
-                    return
+                    await player.start_playback(voice_channel, next_track)  # type: ignore[arg-type]
                 except commands.UserFeedbackCheckFailure:
                     log.warning("Failed to start next track in guild %s", guild)
-
-            if not next_track and player.autoplay_enabled and finished and voice_channel_id:
-                guild_obj = self.bot.get_guild(guild)
-                requester = guild_obj.get_member(finished.requester_id) if guild_obj else None
-                if requester:
-                    auto_track = await self.autoplay.maybe_autoplay(last_track=finished, requester=requester)
-                    if auto_track:
-                        await player.enqueue(auto_track)
-                        try:
-                            await player.start_playback(voice_channel_id, auto_track)
-                            return
-                        except commands.UserFeedbackCheckFailure:
-                            log.warning("Autoplay failed to start in guild %s", guild)
-            await player.stop()
         except Exception:
             log.exception("Error handling track end for guild %s", guild)
 
