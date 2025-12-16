@@ -91,27 +91,17 @@ class GuildPlayer:
         self.loop_mode = mode
         await self.persist()
 
-    async def on_track_end(self, reason: str) -> tuple[Optional[Track], Optional[Track]]:
+    async def on_track_end(self, reason: str) -> Optional[Track]:
+        if self.current is None:
+            return None
         finished = self.current
-        self.current = None
-        await self.config.guild_from_id(self.guild_id).current.clear()
-
-        if finished is None:
-            return None, None
-
-        next_track: Optional[Track] = None
         if self.loop_mode == LoopMode.TRACK:
-            next_track = finished
-        elif self.loop_mode == LoopMode.QUEUE:
+            return finished
+        if self.loop_mode == LoopMode.QUEUE:
             self.queue.append(finished)
-            next_track = self.pop_next()
-        else:
-            next_track = self.pop_next()
+        return self.pop_next()
 
-        await self.persist()
-        return finished, next_track
-
-    async def start_playback(self, voice_channel: discord.abc.Snowflake | int, track: Track) -> None:
+    async def start_playback(self, voice_channel: discord.VoiceChannel, track: Track) -> None:
         """Start playback for the provided track through Lavalink."""
         player = await self._get_lavalink_player(voice_channel=voice_channel)
         if player is None:
@@ -121,12 +111,11 @@ class GuildPlayer:
         await player.play(track.lavalink_track, start_time=0)
         await self.config.guild_from_id(self.guild_id).current.set(track.to_dict())
 
-    async def maybe_start_next(self, voice_channel: discord.abc.Snowflake | int) -> Optional[Track]:
+    async def maybe_start_next(self, voice_channel: discord.VoiceChannel) -> Optional[Track]:
         if self.current:
             return self.current
         next_track = self.pop_next()
         if next_track:
-            await self.persist()
             await self.start_playback(voice_channel, next_track)
             return next_track
         return None
@@ -148,10 +137,8 @@ class GuildPlayer:
         if not player:
             raise commands.UserFeedbackCheckFailure("Nothing is playing right now.")
         await player.set_volume(level)
-        self.default_volume = level
-        await self.config.guild_from_id(self.guild_id).default_volume.set(level)
 
-    async def _get_lavalink_player(self, voice_channel: Optional[discord.abc.Snowflake | int] = None):
+    async def _get_lavalink_player(self, voice_channel: Optional[discord.VoiceChannel] = None):
         try:
             from redbot.cogs.audio import lavalink
         except ImportError:
@@ -159,8 +146,7 @@ class GuildPlayer:
 
         player = lavalink.get_player(self.guild_id)
         if player is None and voice_channel is not None:
-            channel_id = voice_channel if isinstance(voice_channel, int) else voice_channel.id
-            await lavalink.connect(self.guild_id, channel_id)
+            await lavalink.connect(self.guild_id, voice_channel.id)
             player = lavalink.get_player(self.guild_id)
         return player
 

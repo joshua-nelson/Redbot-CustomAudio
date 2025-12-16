@@ -37,7 +37,7 @@ class MuseMusic(commands.Cog):
         self.resolver = ResolverService()
         self.player_controller = PlayerController(bot, self.config)
         self.autoplay = AutoplayService(self.resolver)
-        self.events = LavalinkEvents(self.player_controller, self.autoplay, bot)
+        self.events = LavalinkEvents(self.player_controller)
 
     async def cog_load(self) -> None:
         await self.events.connect()
@@ -166,14 +166,7 @@ class MuseMusic(commands.Cog):
         if not channel:
             return
         player = await self.player_controller.get_player(ctx.guild)
-        if mode:
-            try:
-                target_mode = LoopMode(mode.lower())
-            except ValueError:
-                await ctx.send("Loop mode must be one of: off, track, queue.")
-                return
-        else:
-            target_mode = LoopMode.OFF
+        target_mode = LoopMode(mode) if mode else LoopMode.OFF
         try:
             await player.set_loop(target_mode)
         except commands.UserFeedbackCheckFailure as exc:
@@ -234,33 +227,9 @@ class MuseMusic(commands.Cog):
         except commands.UserFeedbackCheckFailure as exc:
             await ctx.send(str(exc))
             return
+        config = self.config.guild(ctx.guild)
+        await config.default_volume.set(level)
         await ctx.send(f"Volume set to {level}.")
-
-    @commands.hybrid_command(name="autoplay")
-    async def autoplay(self, ctx: commands.Context, enabled: bool) -> None:
-        """Toggle autoplay for when the queue ends."""
-        channel = await self._ensure_voice(ctx)
-        if not channel:
-            return
-        player = await self.player_controller.get_player(ctx.guild)
-        player.autoplay_enabled = enabled
-        await self.config.guild(ctx.guild).autoplay.set(enabled)
-        await ctx.send(f"Autoplay {'enabled' if enabled else 'disabled'}.")
-
-    @commands.hybrid_command(name="maxqueue")
-    @commands.admin_or_permissions(manage_guild=True)
-    async def maxqueue(self, ctx: commands.Context, size: int) -> None:
-        """Set the maximum queue length for this server."""
-        channel = await self._ensure_voice(ctx)
-        if not channel:
-            return
-        if size < 1 or size > 1000:
-            await ctx.send("Queue size must be between 1 and 1000.")
-            return
-        player = await self.player_controller.get_player(ctx.guild)
-        player.max_queue_length = size
-        await self.config.guild(ctx.guild).max_queue_length.set(size)
-        await ctx.send(f"Max queue size set to {size}.")
 
     @play.autocomplete("query")
     async def _play_autocomplete(self, interaction: discord.Interaction, current: str):
